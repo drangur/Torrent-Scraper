@@ -1,0 +1,11 @@
+{
+  "base_url": "https://fosstorrents.com",
+  "sitemap_path": "/sitemap.xml",
+  "category_paths": ["/distributions/", "/games/", "/softwares/"],
+  "skip_prefixes": ["/blog/", "/batches/", "/partnership/", "/donate", "/search/"],
+  "output_file": "torrents.txt",
+  "delay": 1.5,
+  "category": null,
+  "limit": null,
+  "user_agent": "Research"
+}
