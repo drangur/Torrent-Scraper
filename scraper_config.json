@@ -1,11 +1,33 @@
 {
-  "base_url": "https://fosstorrents.com",
-  "sitemap_path": "/sitemap.xml",
-  "category_paths": ["/distributions/", "/games/", "/softwares/"],
-  "skip_prefixes": ["/blog/", "/batches/", "/partnership/", "/donate", "/search/"],
   "output_file": "torrents.json",
   "delay": 1.5,
   "category": null,
   "limit": null,
-  "user_agent": "Research"
+  "site": null,
+  "user_agent": "Research",
+  "sites": [
+    {
+      "name": "Fitgitl",
+      "base_url": "https://fitgirl-repacks.site/",
+      "discovery": {
+        "type": "sitemap",
+        "sitemap_path": "/sitemap_index.xml",
+        "child_sitemap_pattern": "post-sitemap"
+      }
+    },
+    {
+      "name": "fosstorrents",
+      "base_url": "https://fosstorrents.com",
+      "discovery": {
+        "type": "sitemap",
+        "sitemap_path": "/sitemap.xml",
+        "category_paths": ["/distributions/", "/games/", "/softwares/"],
+        "skip_prefixes": ["/blog/", "/batches/", "/partnership/", "/donate", "/search/"]
+      },
+      "traverse_categories": true,
+      "download_link_pattern": "href=\"(/thankyou/\\?[^\"]+)\"",
+      "redirect_pattern": "window\\.location\\s*=\\s*\"([^\"]+)\"",
+      "require_torrent_suffix": true
+    }
+  ]
 }
