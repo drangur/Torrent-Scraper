@@ -3,7 +3,7 @@
   "sitemap_path": "/sitemap.xml",
   "category_paths": ["/distributions/", "/games/", "/softwares/"],
   "skip_prefixes": ["/blog/", "/batches/", "/partnership/", "/donate", "/search/"],
-  "output_file": "torrents.txt",
+  "output_file": "torrents.json",
   "delay": 1.5,
   "category": null,
   "limit": null,

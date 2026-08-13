@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Crawl a fosstorrents.com-style site and convert every project's .torrent
-download into a magnet link, appending new ones to torrents.txt for use with
-monitor.py.
+download into a magnet link, saving new ones to torrents.json (a JSON object
+mapping "application name" -> [magnet link, ...]) for use with monitor.py.
 
 fosstorrents.com is a legitimate site that tracks and seeds official
 releases of free/open-source software, games and Linux/BSD distributions —
@@ -36,7 +36,7 @@ DEFAULT_CONFIG = {
     'sitemap_path': '/sitemap.xml',
     'category_paths': ['/distributions/', '/games/', '/softwares/'],
     'skip_prefixes': ['/blog/', '/batches/', '/partnership/', '/donate', '/search/'],
-    'output_file': 'torrents.txt',
+    'output_file': 'torrents.json',
     'delay': 1.5,
     'category': None,
     'limit': None,
@@ -160,21 +160,42 @@ def crawl(config):
             yield {'magnet': magnet, 'infoHash': info['infoHash'], 'name': info['name'], 'source': page_url}
 
 
-def load_existing_hashes(torrents_file):
+def load_existing(torrents_file):
+    """Load the existing torrents.json (name -> [magnet, ...]) if present.
+    Returns (data_dict, set_of_known_info_hashes_lowercase).
+    """
+    data = {}
+    if os.path.exists(torrents_file):
+        try:
+            with open(torrents_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                data = {}
+        except (json.JSONDecodeError, OSError) as err:
+            log(f'Warning: failed to read {torrents_file} ({err}); starting fresh.')
+            data = {}
+
     hashes = set()
-    if not os.path.exists(torrents_file):
-        return hashes
-    with open(torrents_file, 'r', encoding='utf-8') as f:
-        for line in f:
-            m = re.search(r'btih:([a-fA-F0-9]{40})', line)
+    for links in data.values():
+        for link in links:
+            m = re.search(r'btih:([a-fA-F0-9]{40})', link)
             if m:
                 hashes.add(m.group(1).lower())
-    return hashes
+    return data, hashes
 
 
-def append_magnet(torrents_file, magnet, name, source):
-    with open(torrents_file, 'a', encoding='utf-8') as f:
-        f.write(f'\n# {name or "unknown"} — via {source}\n{magnet}\n')
+def save_torrents(torrents_file, data):
+    with open(torrents_file, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+        f.write('\n')
+
+
+def add_magnet(data, torrents_file, magnet, name):
+    key = name or 'unknown'
+    data.setdefault(key, [])
+    if magnet not in data[key]:
+        data[key].append(magnet)
+    save_torrents(torrents_file, data)
 
 
 def main():
@@ -207,7 +228,7 @@ def main():
 
     log(f'Target site: {config["base_url"]}')
 
-    existing = load_existing_hashes(output_file)
+    data, existing = load_existing(output_file)
     log(f'{len(existing)} magnet(s) already present in {output_file}')
 
     found = 0
@@ -217,7 +238,7 @@ def main():
             found += 1
             if entry['infoHash'].lower() in existing:
                 continue
-            append_magnet(output_file, entry['magnet'], entry['name'], entry['source'])
+            add_magnet(data, output_file, entry['magnet'], entry['name'])
             existing.add(entry['infoHash'].lower())
             added += 1
     except KeyboardInterrupt:
