@@ -37,6 +37,7 @@ DEFAULT_TOP_LEVEL = {
     'category': None,
     'limit': None,
     'site': None,
+    'keyword': None,
     'user_agent': torrent_utils.DEFAULT_USER_AGENT,
     'sites': [],
 }
@@ -69,7 +70,7 @@ def load_config(config_path):
             with open(config_path, 'r', encoding='utf-8') as f:
                 user_config = json.load(f)
             config.update({k: v for k, v in user_config.items()
-                           if v is not None or k in ('category', 'limit', 'site')})
+                           if v is not None or k in ('category', 'limit', 'site', 'keyword')})
             logger.debug(f'Config loaded: {len(config.get("sites") or [])} site(s) defined.')
         except (json.JSONDecodeError, OSError) as err:
             logger.warning(f'Failed to read {config_path} ({err}); using defaults.')
@@ -87,7 +88,7 @@ def site_defaults(config, site):
 
 def get_project_pages(site):
     """Return the list of individual project page URLs for a site, per its
-    configured discovery strategy ('sitemap' or 'listing').
+    configured discovery strategy ('sitemap', 'listing', or 'search').
     """
     discovery = site.get('discovery', {})
     dtype = discovery.get('type', 'sitemap')
@@ -95,6 +96,8 @@ def get_project_pages(site):
         return _discover_via_sitemap(site, discovery)
     if dtype == 'listing':
         return _discover_via_listing(site, discovery)
+    if dtype == 'search':
+        return _discover_via_search(site, discovery)
     raise ValueError(f'Unknown discovery type {dtype!r} for site {site.get("name")!r}')
 
 
@@ -213,6 +216,72 @@ def _discover_via_listing(site, discovery):
 
     if len(seen_listing_pages) >= max_pages and to_visit:
         logger.debug(f'Stopped after reaching max_pages={max_pages}; more listing pages may remain.')
+    return pages
+
+
+def _discover_via_search(site, discovery):
+    """Query a known torrent indexer's search feature for a keyword and
+    collect the result pages' links, paginating the same way as a 'listing'
+    discovery. Requires a `keyword` on the site (from -k/--keyword or the
+    config's top-level "keyword"); sites with no keyword are skipped
+    entirely, since there's nothing sensible to crawl without one.
+    """
+    keyword = site.get('keyword')
+    if not keyword:
+        logger.warning(f'[{site.get("name", site["base_url"])}] Skipping: this is a search-type site '
+                        f'and no keyword was given (use -k/--keyword).')
+        return []
+
+    base_url = site['base_url'].rstrip('/')
+    search_path_pattern = discovery['search_path_pattern']
+    result_link_pattern = discovery['result_link_pattern']
+    next_page_pattern = discovery.get('next_page_pattern')
+    max_pages = discovery.get('max_pages', 5)
+
+    encoded_keyword = urllib.parse.quote(keyword)
+    start_path = search_path_pattern.format(query=encoded_keyword)
+
+    pages = []
+    seen_listing_pages = set()
+    to_visit = [start_path]
+
+    logger.info(f'[{site.get("name", base_url)}] Searching for "{keyword}"...')
+    while to_visit and len(seen_listing_pages) < max_pages:
+        listing_path = to_visit.pop(0)
+        listing_url = torrent_utils.resolve_url(listing_path, base_url)
+        if listing_url in seen_listing_pages:
+            continue
+        seen_listing_pages.add(listing_url)
+
+        logger.debug(f'Fetching search result page {len(seen_listing_pages)}/{max_pages}: {listing_url}')
+        try:
+            html = torrent_utils.fetch_text(listing_url, user_agent=site['user_agent'])
+        except Exception as err:
+            logger.error(f'  ! failed to fetch search results: {err}')
+            break
+        time.sleep(site['delay'])
+
+        new_links = 0
+        for href in re.findall(result_link_pattern, html):
+            url = torrent_utils.resolve_url(href, base_url)
+            if url not in pages:
+                pages.append(url)
+                new_links += 1
+        logger.debug(f'  found {new_links} new result link(s) on this page (total so far: {len(pages)}).')
+
+        if next_page_pattern:
+            m = re.search(next_page_pattern, html)
+            if m:
+                next_url = torrent_utils.resolve_url(m.group(1), base_url)
+                if next_url not in seen_listing_pages:
+                    to_visit.append(next_url)
+                    logger.debug(f'  next page: {next_url}')
+            else:
+                logger.debug('  no next-page link found; stopping pagination.')
+
+    if len(seen_listing_pages) >= max_pages and to_visit:
+        logger.debug(f'Stopped after reaching max_pages={max_pages}; more result pages may remain.')
+    logger.info(f'[{site.get("name", base_url)}] Search found {len(pages)} result(s) for "{keyword}".')
     return pages
 
 
@@ -517,6 +586,8 @@ def main():
                          help='Only scan the first N project pages per site (overrides config limit)')
     parser.add_argument('-s', '--site', default=None,
                          help='Only crawl the site with this "name" from the config (overrides config site)')
+    parser.add_argument('-k', '--keyword', default=None,
+                         help='Search keyword for "search"-type sites (known torrent indexers), e.g. "linux"')
     parser.add_argument('-v', '--verbose', action='store_true',
                          help='Enable debug-level logging (per-page/per-link detail)')
     parser.add_argument('--no-interactive', action='store_true',
@@ -535,6 +606,8 @@ def main():
         config['limit'] = args.limit
     if args.site is not None:
         config['site'] = args.site
+    if args.keyword is not None:
+        config['keyword'] = args.keyword
 
     sites = config.get('sites') or []
     if not sites:
@@ -553,6 +626,11 @@ def main():
         chosen_category = interactive_select_category(sites)
         if chosen_category:
             config['category'] = chosen_category
+    if interactive and config.get('keyword') is None and any(
+            s.get('discovery', {}).get('type') == 'search' for s in sites):
+        keyword = input('\nEnter a search keyword (e.g. "linux"): ').strip()
+        if keyword:
+            config['keyword'] = keyword
 
     logger.info(f'{len(sites)} site(s) queued to crawl: '
                 f'{", ".join(s.get("name", s.get("base_url", "?")) for s in sites)}')
@@ -576,6 +654,12 @@ def main():
                 merged['category'] = config['category']
             if config.get('limit'):
                 merged['limit'] = config['limit']
+            if config.get('keyword'):
+                merged['keyword'] = config['keyword']
+
+            if merged.get('discovery', {}).get('type') == 'search' and not merged.get('keyword'):
+                logger.info(f'Skipping {merged.get("name", merged["base_url"])}: search-type site with no keyword given.')
+                continue
 
             site_label = merged.get('name', merged['base_url'])
             logger.info(f'Target site: {site_label} ({merged["base_url"]})')

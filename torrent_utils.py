@@ -6,11 +6,13 @@ pages to visit, how to find download links, how to resolve redirects) lives
 entirely in scraper_config.json and is interpreted generically by scraper.py.
 """
 
+import gzip
 import hashlib
 import html
 import re
 import urllib.parse
 import urllib.request
+import zlib
 
 import bencode
 
@@ -18,11 +20,39 @@ MAGNET_RE = re.compile(r'magnet:\?[^\s"\'<>]+')
 
 DEFAULT_USER_AGENT = 'P2P-Monitor-Scraper/1.0 (+https://github.com/) research/personal use'
 
+# Static headers a real desktop browser sends on a normal page navigation
+# (Chrome on Windows, minus the User-Agent itself which callers can override
+# per-site). Sent on every request so traffic looks like an ordinary browser
+# instead of a bare-bones script - this is just filling in headers a real
+# browser always includes, not an attempt to defeat any bot/CAPTCHA check.
+DEFAULT_HEADERS = {
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept-Encoding': 'gzip, deflate',
+    'Connection': 'keep-alive',
+    'Upgrade-Insecure-Requests': '1',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'none',
+    'Sec-Fetch-User': '?1',
+}
+
 
 def fetch(url, timeout=15, user_agent=DEFAULT_USER_AGENT):
-    req = urllib.request.Request(url, headers={'User-Agent': user_agent})
+    headers = dict(DEFAULT_HEADERS)
+    headers['User-Agent'] = user_agent
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read()
+        raw = resp.read()
+        encoding = (resp.headers.get('Content-Encoding') or '').lower()
+    # Advertising Accept-Encoding: gzip/deflate means the server may actually
+    # send compressed bytes back; urllib (unlike requests/browsers) doesn't
+    # auto-decompress, so do it ourselves.
+    if encoding == 'gzip':
+        raw = gzip.decompress(raw)
+    elif encoding == 'deflate':
+        raw = zlib.decompress(raw)
+    return raw
 
 
 def fetch_text(url, timeout=15, user_agent=DEFAULT_USER_AGENT):

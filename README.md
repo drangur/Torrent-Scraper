@@ -49,6 +49,12 @@ A site definition has two parts:
    - `"type": "listing"` — crawls paginated listing pages starting at
      `start_paths`, collecting links matched by `project_link_pattern` and
      following `next_page_pattern` (if given) up to `max_pages`.
+   - `"type": "search"` — for known torrent indexers (e.g. 1337x): queries
+     `search_path_pattern` (with `{query}` substituted for the keyword given
+     via `-k`/`--keyword` or an interactive prompt), collects result links
+     matched by `result_link_pattern`, and paginates via `next_page_pattern`
+     up to `max_pages`, same as `"listing"`. Sites of this type are skipped
+     entirely if no keyword is given — there's nothing to search for.
 2. **Extraction** — how to get a magnet link out of each project page:
    - **Primary strategy, always on, no config needed:** every fetched page is
      scanned for embedded `magnet:?...` links directly (HTML-entity-encoded
@@ -127,6 +133,17 @@ pages scanned when this is on, so testing stays cheap.
         "next_page_pattern": "href=\"([^\"]+)\">Next",
         "max_pages": 20
       }
+    },
+    {
+      "name": "1337x",
+      "base_url": "https://1337x.to",
+      "discovery": {
+        "type": "search",
+        "search_path_pattern": "/search/{query}/1/",
+        "result_link_pattern": "href=\"(/torrent/[0-9]+/[^\"]+)\"",
+        "next_page_pattern": "href=\"([^\"]+)\"[^>]*>\\s*Next\\s*<",
+        "max_pages": 3
+      }
     }
   ]
 }
@@ -155,11 +172,15 @@ Which category do you want to scrape?
   2. games
   3. softwares
 Select [default: 0]: 2
+
+Enter a search keyword (e.g. "linux"): linux
 ```
 
 The site prompt only appears when more than one site is configured; the
 category prompt only appears when the selected site(s) define
-`category_paths`. Pressing Enter accepts the default (crawl everything).
+`category_paths`; the keyword prompt only appears when a selected site is a
+`"type": "search"` indexer (e.g. 1337x). Pressing Enter accepts the default
+(crawl everything / skip search sites).
 
 ```
 python scraper.py                          # interactive prompts, or crawls everything if not a terminal
@@ -170,9 +191,10 @@ python scraper.py -n 5                     # override: only scan first 5 pages p
 python scraper.py -o my-list.json -d 2     # override: output file / request delay
 python scraper.py -v                       # verbose: log every discovered/skipped link, redirect, etc.
 python scraper.py --no-interactive         # never prompt, even in a terminal (for cron/automation)
+python scraper.py -s 1337x -k linux        # search a known indexer for a keyword (skips the keyword prompt)
 ```
 
-CLI flags (`-o`, `-d`, `-c`, `-n`, `-s`) always take precedence over the
+CLI flags (`-o`, `-d`, `-c`, `-n`, `-s`, `-k`) always take precedence over the
 config file's values and skip the corresponding prompt, for quick one-off
 overrides or non-interactive runs. Prompts are also skipped automatically
 when stdin isn't a terminal (e.g. piped input, cron, CI).
