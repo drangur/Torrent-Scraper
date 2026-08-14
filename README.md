@@ -26,7 +26,8 @@ links, e.g.:
 The resulting `torrents.json` can be fed into a separate monitoring tool (e.g.
 [P2P Monitor](https://github.com/)) to track seeder/leecher counts.
 
-Requires Python 3.8+. No third-party dependencies — pure standard library.
+Requires Python 3.8+. No third-party dependencies — pure standard library
+(the optional Postgres output needs `psycopg`, see below).
 
 ## Generic, config-driven sites
 
@@ -192,6 +193,7 @@ python scraper.py -o my-list.json -d 2     # override: output file / request del
 python scraper.py -v                       # verbose: log every discovered/skipped link, redirect, etc.
 python scraper.py --no-interactive         # never prompt, even in a terminal (for cron/automation)
 python scraper.py -s 1337x -k linux        # search a known indexer for a keyword (skips the keyword prompt)
+python scraper.py --no-db                  # skip Postgres output even if "database" is configured
 ```
 
 CLI flags (`-o`, `-d`, `-c`, `-n`, `-s`, `-k`) always take precedence over the
@@ -211,6 +213,43 @@ saved incrementally after every discovered torrent, so stopping with Ctrl+C
 keeps everything found so far. Already-seen info hashes (from a previous run
 in the output file) are skipped on the next run.
 
+## Postgres output (optional)
+
+If `scraper_config.json` has a top-level `"database"` object, every
+discovered magnet is *also* written to a `scraped_torrents` table (in
+addition to, not instead of, `torrents.json`):
+
+```json
+"database": {
+  "host": "localhost",
+  "port": 5432,
+  "dbname": "anti_piracy_dashboard",
+  "user": "postgres",
+  "password": "..."
+}
+```
+
+The table is created automatically on first run if it doesn't exist:
+
+```sql
+CREATE TABLE scraped_torrents (
+    id            SERIAL PRIMARY KEY,
+    info_hash     TEXT NOT NULL UNIQUE,
+    name          TEXT NOT NULL,
+    magnet        TEXT NOT NULL,
+    source_site   TEXT NOT NULL,
+    source_url    TEXT NOT NULL,
+    first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_seen_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
+
+`info_hash` is unique, so re-scraping the same magnet just bumps
+`last_seen_at` (and refreshes `name`/`source_url`) instead of creating a
+duplicate row. Requires the `psycopg` package (`pip install psycopg`); pass
+`--no-db` to skip Postgres entirely for a given run. Omit `"database"` from
+the config (or leave it `null`) to disable this feature completely.
+
 ## Files
 
 - `scraper.py` — generic, config-driven crawler / CLI entry point. Reads
@@ -221,4 +260,6 @@ in the output file) are skipped on the next run.
   magnet link, extract info hash/name from a magnet URI).
 - `bencode.py` — pure-stdlib bencode encoder/decoder (used to parse `.torrent`
   files and compute info hashes).
+- `db.py` — optional Postgres output: connects, creates `scraped_torrents` if
+  missing, and upserts each discovered magnet.
 - `scraper_config.json` — site definitions and default configuration.

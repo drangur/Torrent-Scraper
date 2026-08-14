@@ -40,6 +40,7 @@ DEFAULT_TOP_LEVEL = {
     'keyword': None,
     'user_agent': torrent_utils.DEFAULT_USER_AGENT,
     'sites': [],
+    'database': None,
 }
 
 logger = logging.getLogger('scraper')
@@ -593,6 +594,9 @@ def main():
     parser.add_argument('--no-interactive', action='store_true',
                          help='Never prompt for site/category selection, even in an interactive terminal '
                               '(useful for cron/automation)')
+    parser.add_argument('--no-db', action='store_true',
+                         help='Skip writing to Postgres even if "database" is configured '
+                              '(torrents.json is still written either way)')
     args = parser.parse_args()
 
     configure_logging(verbose=args.verbose)
@@ -642,8 +646,21 @@ def main():
     data, existing = load_existing(output_file)
     logger.info(f'{len(existing)} magnet(s) already present in {output_file}')
 
+    db_conn = None
+    if config.get('database') and not args.no_db:
+        import db
+        try:
+            db_conn = db.connect(config['database'])
+            db.ensure_table(db_conn)
+            logger.info(f'Connected to Postgres database {config["database"].get("dbname")!r} '
+                        f'(table "scraped_torrents" ready).')
+        except Exception as err:
+            logger.error(f'Failed to connect to Postgres, continuing without DB output: {err}')
+            db_conn = None
+
     found = 0
     added = 0
+    db_added = 0
     per_site_stats = []
     try:
         for site in sites:
@@ -668,6 +685,13 @@ def main():
             for entry in crawl(merged):
                 found += 1
                 site_found += 1
+                if db_conn is not None:
+                    try:
+                        if db.upsert_magnet(db_conn, entry['infoHash'].lower(), entry['name'],
+                                             entry['magnet'], site_label, entry['source']):
+                            db_added += 1
+                    except Exception as err:
+                        logger.error(f'  ! failed to write to Postgres: {err}')
                 if entry['infoHash'].lower() in existing:
                     logger.debug(f'  already known, not re-added: {entry["name"]}')
                     continue
@@ -678,11 +702,16 @@ def main():
             per_site_stats.append((site_label, site_found, site_added))
     except KeyboardInterrupt:
         logger.warning('Interrupted by user.')
+    finally:
+        if db_conn is not None:
+            db_conn.close()
 
     logger.info('Per-site summary:')
     for site_label, site_found, site_added in per_site_stats:
         logger.info(f'  {site_label}: {site_found} found, {site_added} new')
     logger.info(f'Done. Found {found} magnet link(s), added {added} new one(s) to {output_file}.')
+    if db_conn is not None or config.get('database'):
+        logger.info(f'Postgres: {db_added} new/updated row(s) written to scraped_torrents.')
 
 
 if __name__ == '__main__':

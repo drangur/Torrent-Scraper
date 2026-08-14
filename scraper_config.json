@@ -5,6 +5,13 @@
   "limit": null,
   "site": null,
   "user_agent": "Research",
+  "database": {
+    "host": "localhost",
+    "port": 5432,
+    "dbname": "anti_piracy_dashboard",
+    "user": "postgres",
+    "password": "jWMx55xCMQtVTG8v1xoj"
+  },
   "sites": [
     {
       "name": "Fitgitl",
@@ -28,18 +35,6 @@
       "download_link_pattern": "href=\"(/thankyou/\\?[^\"]+)\"",
       "redirect_pattern": "window\\.location\\s*=\\s*\"([^\"]+)\"",
       "require_torrent_suffix": true
-    },
-    {
-      "name": "1337x",
-      "base_url": "https://1337x.to",
-      "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-      "discovery": {
-        "type": "search",
-        "search_path_pattern": "/search/{query}/1/",
-        "result_link_pattern": "href=\"(/torrent/[0-9]+/[^\"]+)\"",
-        "next_page_pattern": "href=\"([^\"]+)\"[^>]*>\\s*Next\\s*<",
-        "max_pages": 3
-      }
     }
   ]
 }
